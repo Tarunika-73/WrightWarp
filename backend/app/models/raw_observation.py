@@ -33,3 +33,9 @@ class RawObservationDocument(BaseModel):
     payload_hash: str
     status: RawObservationStatus = RawObservationStatus.COLLECTED
     provenance: DataProvenance = DataProvenance.REAL
+    # Quality decision recorded on the raw observation too, so an
+    # observation that could not become a FlightQuote (e.g. REJECTED for
+    # an unsupported booking window) still carries *why*.
+    quality_status: str | None = None
+    quality_reason: str | None = None
+    extraction_version: str | None = None

@@ -1,4 +1,8 @@
+from datetime import datetime, timezone
+
 from pymongo.asynchronous.database import AsyncDatabase
+
+from app.core.routes import list_routes
 
 from app.db.object_id import to_str_id
 from app.models.route import RouteDocument
@@ -18,6 +22,19 @@ class RouteRepository:
 
     async def get_by_route_code(self, route_code: str) -> dict | None:
         return await self.collection.find_one({"route_code": route_code})
+
+    async def sync_master(self) -> None:
+        """Mirror ``app.core.routes.MONITORED_ROUTES`` (idempotent upsert). Weights live in weight sets."""
+        now = datetime.now(timezone.utc)
+        for route in list_routes():
+            await self.collection.update_one(
+                {"route_code": route.route_code},
+                {
+                    "$set": {"origin": route.origin, "destination": route.destination, "active": True, "updated_at": now},
+                    "$setOnInsert": {"created_at": now, "weight": None, "source_reference": None},
+                },
+                upsert=True,
+            )
 
     async def list_active(self) -> list[dict]:
         return [doc async for doc in self.collection.find({"active": True})]

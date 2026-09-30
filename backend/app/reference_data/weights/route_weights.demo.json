@@ -1,0 +1,13 @@
+{
+  "version": "DEMO-2024.1",
+  "label": "DEMO",
+  "is_official": false,
+  "source": "Hand-picked illustrative magnitudes for the WrightWarp demonstrator. NOT DGCA data.",
+  "description": "Relative route passenger volumes used only so the Laspeyres/Paasche/Fisher formulas can be demonstrated. Replace with official DGCA domestic origin-destination traffic (add a file with label OFFICIAL) before any statistical use.",
+  "unit": "million passengers per year (illustrative)",
+  "quantities": {
+    "2024": {"DEL-BOM": 4.6, "DEL-BLR": 3.9, "BOM-BLR": 3.1, "DEL-CCU": 2.3, "BLR-HYD": 1.6, "MAA-DEL": 1.9},
+    "2025": {"DEL-BOM": 4.8, "DEL-BLR": 4.2, "BOM-BLR": 3.2, "DEL-CCU": 2.5, "BLR-HYD": 1.8, "MAA-DEL": 2.0},
+    "2026": {"DEL-BOM": 4.9, "DEL-BLR": 4.5, "BOM-BLR": 3.3, "DEL-CCU": 2.6, "BLR-HYD": 2.0, "MAA-DEL": 2.1}
+  }
+}

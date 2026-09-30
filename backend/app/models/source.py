@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.enums import SourceStatus, SourceType
+from app.core.enums import DataProvenance, SourceStatus, SourceType
 
 
 class SourceDocument(BaseModel):
@@ -34,3 +34,4 @@ class SourceDocument(BaseModel):
     requires_terms_review: bool
     requires_robots_review: bool
     notes: str
+    data_provenance: DataProvenance = DataProvenance.REAL

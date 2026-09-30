@@ -1,7 +1,7 @@
 import pytest
 
 import app.db.mongodb as mongodb_module
-from app.db.mongodb import close_mongo_connection, connect_to_mongo, get_database, ping
+from app.db.mongodb import close_mongo_connection, connect_to_mongo, get_database, is_connected, ping
 
 EXPECTED_COLLECTIONS = {
     "sources",
@@ -22,14 +22,19 @@ async def test_connect_ping_disconnect():
         assert await ping() is True
     finally:
         await close_mongo_connection()
-    assert await ping() is False
+    assert is_connected() is False
 
 
 @pytest.mark.asyncio
-async def test_get_database_requires_a_connected_client(monkeypatch):
+async def test_get_database_connects_lazily(monkeypatch):
+    # Serverless runtimes may not run the ASGI lifespan: the first
+    # get_database() call must create the client instead of failing.
     monkeypatch.setattr(mongodb_module, "_client", None)
-    with pytest.raises(RuntimeError):
-        get_database()
+    monkeypatch.setattr(mongodb_module, "_client_loop", None)
+    database = get_database()
+    assert database.name
+    assert is_connected() is True
+    await close_mongo_connection()
 
 
 @pytest.mark.asyncio

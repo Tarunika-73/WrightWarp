@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.enums import SourceStatus
+from app.core.enums import DataProvenance, SourceStatus
 from app.core.sources import ALL_SOURCES, get_source, list_sources
 
 
@@ -22,13 +22,15 @@ def test_lookup_unknown_source_raises():
         get_source("NOT_A_REAL_SOURCE")
 
 
-def test_only_mock_source_is_implemented():
+def test_only_non_real_sources_are_implemented():
     implemented = [s for s in ALL_SOURCES if s.status == SourceStatus.IMPLEMENTED]
-    assert [s.source_id for s in implemented] == ["MOCK"]
+    assert sorted(s.source_id for s in implemented) == ["DEMO_SIM", "MOCK"]
+    for source in implemented:
+        assert source.data_provenance != DataProvenance.REAL
 
 
 def test_every_real_source_is_pending_review_and_disabled():
-    real_sources = [s for s in ALL_SOURCES if s.source_id != "MOCK"]
+    real_sources = [s for s in ALL_SOURCES if s.data_provenance == DataProvenance.REAL]
     assert real_sources, "expected at least one non-mock source to be registered"
     for source in real_sources:
         assert source.status == SourceStatus.PENDING_REVIEW

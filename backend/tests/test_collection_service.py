@@ -199,11 +199,11 @@ async def test_unknown_source_id_fails_without_calling_any_adapter(db_session, s
 @pytest.mark.asyncio
 async def test_search_run_status_persisted_matches_outcome(db_session, seed_airports):
     from app.collection.adapters.mock import MockSourceAdapter
-    from app.models.search_run import SearchRun
+    from app.repositories.search_run_repository import SearchRunRepository
 
     service = _service(db_session, MockSourceAdapter())
     result = await service.run(_request())
 
-    run = db_session.get(SearchRun, result.search_run_id)
-    assert run.status == SearchRunStatus.SUCCESS
-    assert run.records_valid == 1
+    run = await SearchRunRepository(db_session).get_by_id(result.search_run_id)
+    assert run["status"] == SearchRunStatus.SUCCESS.value
+    assert run["records_valid"] == 1

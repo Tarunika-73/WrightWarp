@@ -27,6 +27,7 @@ def _to_document(definition: SourceDefinition) -> dict:
         requires_terms_review=definition.requires_terms_review,
         requires_robots_review=definition.requires_robots_review,
         notes=definition.notes,
+        data_provenance=definition.data_provenance,
     ).model_dump(exclude={"id"})
 
 

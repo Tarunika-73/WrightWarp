@@ -30,6 +30,8 @@ class FlightQuoteBase(BaseModel):
     arrival_datetime: datetime | None = None
     travel_date: date
     search_datetime: datetime
+    # IST calendar date the price was observed on - index periods are built on this.
+    observation_date: date | None = None
     lead_days: int
 
     cabin_class: CabinClass = CabinClass.ECONOMY
@@ -38,6 +40,7 @@ class FlightQuoteBase(BaseModel):
 
     base_fare: float | None = Field(default=None, ge=0)
     taxes: float | None = Field(default=None, ge=0)
+    airport_charges: float | None = Field(default=None, ge=0)
     user_development_fee: float | None = Field(default=None, ge=0)
     convenience_fee: float | None = Field(default=None, ge=0)
     fuel_surcharge: float | None = Field(default=None, ge=0)
@@ -47,6 +50,9 @@ class FlightQuoteBase(BaseModel):
     other_fees: float | None = Field(default=None, ge=0)
     total_fare: float | None = Field(default=None, ge=0)
     currency: str = Field(min_length=3, max_length=3)
+    # Which fare components the source actually provided. A component not
+    # listed here is unavailable - never zero, never estimated.
+    components_available: list[str] = Field(default_factory=list)
 
     availability_status: AvailabilityStatus = AvailabilityStatus.UNKNOWN
     cancellation_status: str | None = None
@@ -59,6 +65,12 @@ class FlightQuoteBase(BaseModel):
     quality_status: QualityStatus = QualityStatus.RAW
     quality_score: float | None = Field(default=None, ge=0, le=1)
     quality_reason: str | None = None
+    quality_flags: list[str] = Field(default_factory=list)
+    quality_robust_z: float | None = None
+    quality_rules_version: str | None = None
+    dedup_key: str | None = None
+    normalization_version: str | None = None
+    extraction_version: str | None = None
 
     @field_validator("origin", "destination")
     @classmethod
@@ -87,7 +99,13 @@ class FlightQuoteBase(BaseModel):
     def check_available_quotes_have_fare(self) -> "FlightQuoteBase":
         status = self.availability_status
         status_value = status.value if isinstance(status, AvailabilityStatus) else status
-        if status_value == AvailabilityStatus.AVAILABLE.value and self.total_fare is None:
+        quality = self.quality_status
+        quality_value = quality.value if isinstance(quality, QualityStatus) else quality
+        # The quality engine may keep an AVAILABLE-but-fareless observation
+        # on record as MISSING/REJECTED (never silently dropped); anything
+        # else claiming availability must carry a price.
+        flagged = quality_value in (QualityStatus.MISSING.value, QualityStatus.REJECTED.value)
+        if status_value == AvailabilityStatus.AVAILABLE.value and self.total_fare is None and not flagged:
             raise ValueError("AVAILABLE quotes must carry a total_fare")
         return self
 

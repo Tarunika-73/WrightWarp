@@ -1,7 +1,8 @@
 """Coordinates one collection attempt end-to-end.
 
 Pipeline: validate request -> look up source -> compliance check -> rate
-limiter -> adapter -> raw observation -> normalization -> persistence.
+limiter -> adapter -> raw observation -> normalization -> quality
+assessment (app.quality.engine) -> persistence.
 This class contains no statistics or index logic (Phase 3+); its only job
 is to run one (or a batch of) ``CollectionRequest`` and leave an
 auditable trail behind.
@@ -11,22 +12,24 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
-from pydantic import ValidationError
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.collection.adapters.registry import AdapterRegistry, adapter_registry
 from app.collection.errors import CollectionException
-from app.collection.normalizer import NormalizationError, normalize
 from app.collection.rate_limiter import RateLimiter
-from app.collection.repository import CollectionRepository
+from app.collection.repository import CollectionRepository, compute_payload_hash
 from app.core.enums import (
     CollectionErrorType,
     CollectionOutcome,
-    DataProvenance,
+    QualityStatus,
     RawObservationStatus,
     SearchRunStatus,
     SourceStatus,
 )
+from app.normalization.fares import observation_date
+from app.normalization.pipeline import ObservationContext, process_observation, to_fare_observation
+from app.quality.context import build_live_context
+from app.quality.engine import QualityContext, compute_dedup_key
 from app.core.sources import SourceDefinition, get_source
 from app.schemas.collection import CollectionError, CollectionRequest, CollectionResult
 
@@ -52,6 +55,7 @@ class CollectionService:
         backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        self._db = db
         self.repository = CollectionRepository(db)
         self.adapters = adapters
         self.rate_limiter = rate_limiter or RateLimiter()
@@ -114,11 +118,15 @@ class CollectionService:
                 warnings=retry_warnings,
             )
 
-        provenance = DataProvenance.SYNTHETIC if source_def.source_id == "MOCK" else DataProvenance.REAL
+        provenance = source_def.data_provenance
         raw_count = 0
         normalized_count = 0
         completed_at = datetime.now(timezone.utc)
 
+        # Persist every raw payload first (the audit trail never depends on
+        # normalization succeeding), then build the quality context once for
+        # the whole request: one dedup lookup + one reference-distribution query.
+        staged: list[tuple[str, dict, ObservationContext]] = []
         for obs in adapter_outcome.observations:
             raw_observation_id = await self.repository.persist_raw_observation(
                 search_run_id=search_run_id,
@@ -130,22 +138,51 @@ class CollectionService:
                 collected_at=completed_at,
             )
             raw_count += 1
+            ctx = ObservationContext(
+                search_run_id=search_run_id,
+                source=source_def.source_id,
+                origin=request.origin,
+                destination=request.destination,
+                travel_date=request.travel_date,
+                lead_days=request.lead_days,
+                cabin_class=request.cabin_class,
+                search_datetime=started_at,
+                provenance=provenance,
+                raw_observation_id=raw_observation_id,
+                raw_payload_hash=compute_payload_hash(obs.raw_payload),
+                extraction_version=obs.raw_payload.get("extraction_version"),
+            )
+            staged.append((raw_observation_id, obs.raw_payload, ctx))
+
+        quality_context = await self._quality_context(request, staged, started_at)
+
+        for raw_observation_id, raw_payload, ctx in staged:
             try:
-                quote = normalize(
-                    search_run_id=search_run_id,
-                    source=source_def.source_id,
-                    request=request,
-                    raw_payload=obs.raw_payload,
-                    provenance=provenance,
-                    search_datetime=started_at,
-                    raw_observation_id=raw_observation_id,
-                )
-                await self.repository.persist_flight_quote(quote)
+                processed = process_observation(raw_payload, ctx, quality_context)
+            except Exception as exc:  # noqa: BLE001 - one malformed payload must not abort the request
+                logger.exception("collection_normalization_crashed source=%s", source_def.source_id)
+                processed = None
+                error_message = f"normalization failed: {type(exc).__name__}"
+            else:
+                error_message = processed.quote_error
+
+            if processed is not None and processed.quote is not None:
+                await self.repository.persist_flight_quote(processed.quote)
                 normalized_count += 1
-                await self.repository.mark_raw_observation_status(raw_observation_id, RawObservationStatus.NORMALIZED)
-            except (NormalizationError, ValidationError) as exc:
-                await self.repository.mark_raw_observation_status(raw_observation_id, RawObservationStatus.PARSE_FAILED)
-                all_errors.append(CollectionError(error_type=CollectionErrorType.PARSER_ERROR, message=str(exc)))
+                await self.repository.mark_raw_observation_status(
+                    raw_observation_id,
+                    RawObservationStatus.NORMALIZED,
+                    quality_status=processed.assessment.status.value,
+                    quality_reason=processed.assessment.reason,
+                )
+            else:
+                await self.repository.mark_raw_observation_status(
+                    raw_observation_id,
+                    RawObservationStatus.PARSE_FAILED,
+                    quality_status=processed.assessment.status.value if processed else QualityStatus.REJECTED.value,
+                    quality_reason=processed.assessment.reason if processed else error_message,
+                )
+                all_errors.append(CollectionError(error_type=CollectionErrorType.PARSER_ERROR, message=error_message or "normalization failed"))
 
         outcome = (
             CollectionOutcome.SUCCESS
@@ -166,6 +203,28 @@ class CollectionService:
             raw_observations_persisted=raw_count,
             quotes_normalized=normalized_count,
         )
+
+    async def _quality_context(
+        self, request: CollectionRequest, staged: list[tuple[str, dict, ObservationContext]], started_at: datetime
+    ) -> QualityContext:
+        """Prefetch dedup/reference data for the quality engine; degrade to rule-only checks on failure."""
+        keys = []
+        for _id, raw_payload, ctx in staged:
+            try:
+                keys.append(compute_dedup_key(to_fare_observation(raw_payload, ctx)[0]))
+            except Exception:  # noqa: BLE001 - key is best effort; process_observation reports the real problem
+                continue
+        try:
+            return await build_live_context(
+                self._db,
+                route=f"{request.origin}-{request.destination}",
+                lead_days=request.lead_days,
+                observation_date=observation_date(started_at),
+                dedup_keys=[k for k in keys if k],
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("quality_context_unavailable source=%s", request.source_id)
+            return QualityContext()
 
     async def run_batch(self, requests: list[CollectionRequest]) -> list[CollectionResult]:
         """Run several requests independently - one failure never affects another's status."""

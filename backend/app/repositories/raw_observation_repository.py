@@ -14,10 +14,31 @@ class RawObservationRepository:
         result = await self.collection.insert_one(document.model_dump(exclude={"id"}))
         return to_str_id(result.inserted_id)
 
-    async def set_status(self, observation_id: str, status: str) -> None:
-        await self.collection.update_one(
-            {"_id": to_object_id(observation_id)}, {"$set": {"status": status}}
-        )
+    async def set_status(
+        self,
+        observation_id: str,
+        status: str,
+        *,
+        quality_status: str | None = None,
+        quality_reason: str | None = None,
+    ) -> None:
+        update: dict = {"status": status}
+        if quality_status is not None:
+            update["quality_status"] = quality_status
+            update["quality_reason"] = quality_reason
+        await self.collection.update_one({"_id": to_object_id(observation_id)}, {"$set": update})
+
+    async def insert_many(self, documents: list[RawObservationDocument]) -> list[str]:
+        if not documents:
+            return []
+        result = await self.collection.insert_many([d.model_dump(exclude={"id"}) for d in documents], ordered=False)
+        return [to_str_id(i) for i in result.inserted_ids]
+
+    async def get(self, observation_id: str) -> dict | None:
+        doc = await self.collection.find_one({"_id": to_object_id(observation_id)})
+        if doc is not None:
+            doc["_id"] = to_str_id(doc["_id"])
+        return doc
 
     async def find_by_search_run(self, search_run_id: str) -> list[dict]:
         docs = [doc async for doc in self.collection.find({"search_run_id": search_run_id})]

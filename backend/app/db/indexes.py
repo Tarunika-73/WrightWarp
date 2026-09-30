@@ -7,6 +7,8 @@ deliberately not "one index per field."
 """
 from pymongo.asynchronous.database import AsyncDatabase
 
+from app.index_engine import service as index_service
+
 from app.repositories import (
     AirlineRepository,
     AirportRepository,
@@ -28,3 +30,5 @@ async def ensure_indexes(db: AsyncDatabase) -> None:
     await RawObservationRepository(db).ensure_indexes()
     await FlightQuoteRepository(db).ensure_indexes()
     await CollectionErrorRepository(db).ensure_indexes()
+    await index_service.ensure_indexes(db)
+    await db["scheduled_jobs"].create_index([("started_at", -1)])

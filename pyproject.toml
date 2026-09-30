@@ -1,0 +1,19 @@
+[project]
+name = "wrightwarp"
+version = "0.3.0"
+description = "Airfare Price Index for India (SIH26056 prototype) - FastAPI backend deployed on Vercel"
+requires-python = ">=3.11"
+# Runtime dependencies only (what the Vercel function needs). Development and
+# test tooling, and Playwright (browser worker only), live in backend/requirements.txt.
+dependencies = [
+    "fastapi==0.115.6",
+    "pymongo==4.18.2",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.1",
+    "python-dotenv==1.0.1",
+]
+
+[tool.vercel.fastapi.static]
+# The app has CORS middleware; static files carry no secrets, so let Vercel
+# promote the built dashboard (/assets) to the CDN anyway.
+cdn = true

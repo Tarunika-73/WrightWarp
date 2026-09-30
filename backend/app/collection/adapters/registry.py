@@ -9,6 +9,7 @@ absence is exactly what keeps them from running.
 """
 from app.collection.adapters.base import SourceAdapter
 from app.collection.adapters.mock import MockSourceAdapter
+from app.collection.adapters.simulated import SimulatedMarketAdapter
 
 
 class AdapterRegistry:
@@ -27,3 +28,4 @@ class AdapterRegistry:
 
 adapter_registry = AdapterRegistry()
 adapter_registry.register(MockSourceAdapter())
+adapter_registry.register(SimulatedMarketAdapter())

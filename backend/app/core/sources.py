@@ -18,11 +18,12 @@ exists. Only a source whose ``status`` is ``IMPLEMENTED`` *and* whose
 ``enabled`` is ``True`` may be dispatched to by ``CollectionService`` -
 see ``docs/architecture/source-adapters.md`` for the reviewed compliance
 decision behind every entry below (as of 2026-09-29, every real source is
-``PENDING_REVIEW``; only ``MOCK`` is ``IMPLEMENTED``).
+``PENDING_REVIEW``; only the non-real ``MOCK`` and ``DEMO_SIM`` sources are
+``IMPLEMENTED``).
 """
 from dataclasses import dataclass
 
-from app.core.enums import SourceStatus, SourceType
+from app.core.enums import DataProvenance, SourceStatus, SourceType
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,10 @@ class SourceDefinition:
     requires_robots_review: bool
     notes: str
     adapter_name: str | None = None
+    # What every observation from this source is labeled as. Declared per
+    # source (never inferred from the source_id at runtime) so a synthetic
+    # or simulated source can never be mislabeled REAL.
+    data_provenance: DataProvenance = DataProvenance.REAL
 
 
 AIRLINE_SOURCES: tuple[SourceDefinition, ...] = (
@@ -227,9 +232,9 @@ OTA_SOURCES: tuple[SourceDefinition, ...] = (
     ),
 )
 
-# The deterministic, synthetic-data source used to exercise the entire
-# Phase 2 pipeline end-to-end without touching any live website. This is
-# the only source whose status is IMPLEMENTED.
+# Non-real sources. MOCK is the deterministic fixture used by tests;
+# DEMO_SIM is the simulated market that powers the demo dashboard. These
+# are the only IMPLEMENTED sources - no real airline/OTA is.
 MOCK_SOURCES: tuple[SourceDefinition, ...] = (
     SourceDefinition(
         source_id="MOCK",
@@ -245,6 +250,27 @@ MOCK_SOURCES: tuple[SourceDefinition, ...] = (
         requires_robots_review=False,
         notes="Synthetic adapter. Never returns real fares; every observation is tagged DataProvenance.SYNTHETIC.",
         adapter_name="mock",
+        data_provenance=DataProvenance.SYNTHETIC,
+    ),
+    SourceDefinition(
+        source_id="DEMO_SIM",
+        display_name="Simulated Indian domestic fare market (DEMO DATA)",
+        source_type=SourceType.OTA,
+        enabled=True,
+        status=SourceStatus.IMPLEMENTED,
+        robots_url=None,
+        terms_url=None,
+        rate_limit_per_minute=600,
+        requires_browser=False,
+        requires_terms_review=False,
+        requires_robots_review=False,
+        notes=(
+            "Statistical market simulator (app.demo.market) standing in for real sources "
+            "while none is compliance-cleared. Makes no network calls. Every observation is "
+            "tagged DataProvenance.SIMULATED and every derived index is labeled DEMO."
+        ),
+        adapter_name="simulated_market",
+        data_provenance=DataProvenance.SIMULATED,
     ),
 )
 

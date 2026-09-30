@@ -28,12 +28,42 @@ class DataProvenance(str, Enum):
 
 
 class QualityStatus(str, Enum):
+    """Data-quality decision for one observation (app.quality.engine).
+
+    ``VALIDATED`` is the "VALID" status and ``REJECTED`` the "INVALID"
+    status of the Phase 3 specification - the original Phase 1 names are
+    kept so existing documents and tests stay valid. Nothing is ever
+    deleted because of its status: the index engine simply includes only
+    ``INDEX_ELIGIBLE_QUALITY`` observations.
+    """
+
     RAW = "RAW"
     VALIDATED = "VALIDATED"
     REJECTED = "REJECTED"
     OUTLIER = "OUTLIER"
     DUPLICATE = "DUPLICATE"
     PROVISIONAL = "PROVISIONAL"
+    SOLD_OUT = "SOLD_OUT"
+    MISSING = "MISSING"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+
+
+# Observations with these statuses feed the index. PROVISIONAL passed
+# every rule but had no outlier reference distribution to be checked
+# against (e.g. the first days of a new route).
+INDEX_ELIGIBLE_QUALITY: frozenset[str] = frozenset({QualityStatus.VALIDATED.value, QualityStatus.PROVISIONAL.value})
+
+
+class DataLabel(str, Enum):
+    """User-facing label attached to every derived output (index, backtest, API payload).
+
+    Derived from the provenance of the observations that went into it:
+    anything touched by SYNTHETIC/SIMULATED observations is DEMO.
+    """
+
+    DEMO = "DEMO"
+    REAL = "REAL"
+    REFERENCE = "REFERENCE"
 
 
 class AvailabilityStatus(str, Enum):

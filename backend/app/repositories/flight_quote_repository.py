@@ -36,6 +36,7 @@ def _to_document(quote: FlightQuoteCreate, source_type: SourceType) -> FlightQuo
         route=RouteRef(origin=quote.origin, destination=quote.destination),
         travel=TravelInfo(
             travel_date=date_to_datetime(quote.travel_date),
+            observation_date=date_to_datetime(quote.observation_date) if quote.observation_date else None,
             departure_datetime=quote.departure_datetime,
             arrival_datetime=quote.arrival_datetime,
             lead_days=quote.lead_days,
@@ -46,6 +47,7 @@ def _to_document(quote: FlightQuoteCreate, source_type: SourceType) -> FlightQuo
         fare=FareBreakdown(
             base_fare=quote.base_fare,
             taxes=quote.taxes,
+            airport_charges=quote.airport_charges,
             user_development_fee=quote.user_development_fee,
             convenience_fee=quote.convenience_fee,
             fuel_surcharge=quote.fuel_surcharge,
@@ -55,6 +57,7 @@ def _to_document(quote: FlightQuoteCreate, source_type: SourceType) -> FlightQuo
             other_fees=quote.other_fees,
             total_fare=quote.total_fare,
             currency=quote.currency,
+            components_available=quote.components_available,
         ),
         fare_attributes=FareAttributes(
             cabin_class=quote.cabin_class,
@@ -65,13 +68,23 @@ def _to_document(quote: FlightQuoteCreate, source_type: SourceType) -> FlightQuo
         availability=AvailabilityInfo(
             status=quote.availability_status, cancellation_status=quote.cancellation_status
         ),
-        quality=QualityInfo(status=quote.quality_status, score=quote.quality_score, reason=quote.quality_reason),
+        quality=QualityInfo(
+            status=quote.quality_status,
+            score=quote.quality_score,
+            reason=quote.quality_reason,
+            flags=quote.quality_flags,
+            robust_z=quote.quality_robust_z,
+            rules_version=quote.quality_rules_version,
+        ),
         provenance=ProvenanceInfo(
             data_type=quote.provenance,
             collected_at=quote.search_datetime,
             raw_observation_id=quote.raw_observation_id,
             raw_quote_hash=quote.raw_quote_hash,
+            normalization_version=quote.normalization_version,
+            extraction_version=quote.extraction_version,
         ),
+        dedup_key=quote.dedup_key,
     )
 
 
@@ -99,12 +112,14 @@ def _to_flat(doc: dict) -> dict:
         "arrival_datetime": travel.get("arrival_datetime"),
         "travel_date": datetime_to_date(travel["travel_date"]),
         "search_datetime": provenance["collected_at"],
+        "observation_date": datetime_to_date(travel["observation_date"]) if travel.get("observation_date") else None,
         "lead_days": travel["lead_days"],
         "cabin_class": fare_attrs["cabin_class"],
         "fare_family": fare_attrs.get("fare_family"),
         "stops": flight.get("stops"),
         "base_fare": fare.get("base_fare"),
         "taxes": fare.get("taxes"),
+        "airport_charges": fare.get("airport_charges"),
         "user_development_fee": fare.get("user_development_fee"),
         "convenience_fee": fare.get("convenience_fee"),
         "fuel_surcharge": fare.get("fuel_surcharge"),
@@ -114,6 +129,7 @@ def _to_flat(doc: dict) -> dict:
         "other_fees": fare.get("other_fees"),
         "total_fare": fare.get("total_fare"),
         "currency": fare["currency"],
+        "components_available": fare.get("components_available") or [],
         "availability_status": availability["status"],
         "cancellation_status": availability.get("cancellation_status"),
         "refundable": fare_attrs.get("refundable"),
@@ -124,6 +140,12 @@ def _to_flat(doc: dict) -> dict:
         "quality_status": quality["status"],
         "quality_score": quality.get("score"),
         "quality_reason": quality.get("reason"),
+        "quality_flags": quality.get("flags") or [],
+        "quality_robust_z": quality.get("robust_z"),
+        "quality_rules_version": quality.get("rules_version"),
+        "dedup_key": doc.get("dedup_key"),
+        "normalization_version": provenance.get("normalization_version"),
+        "extraction_version": provenance.get("extraction_version"),
         "created_at": doc["created_at"],
     }
 
@@ -156,10 +178,37 @@ class FlightQuoteRepository:
     async def count_by_search_run(self, search_run_id: str) -> int:
         return await self.collection.count_documents({"search_run_id": search_run_id})
 
+    async def insert_many(self, quotes: list[FlightQuoteCreate]) -> list[str]:
+        """Bulk insert (used by the demo backfill). Same mapping as ``create``."""
+        if not quotes:
+            return []
+        documents = [_to_document(q, get_source(q.source).source_type).model_dump(exclude={"id"}) for q in quotes]
+        result = await self.collection.insert_many(documents, ordered=False)
+        return [to_str_id(i) for i in result.inserted_ids]
+
+    async def dedup_key_exists(self, dedup_key: str) -> bool:
+        return await self.collection.count_documents({"dedup_key": dedup_key}, limit=1) > 0
+
+    async def search(self, query: dict, *, skip: int = 0, limit: int = 50, sort: list | None = None) -> list[FlightQuoteRead]:
+        cursor = self.collection.find(query).sort(sort or [("travel.observation_date", -1), ("_id", -1)]).skip(skip).limit(limit)
+        return [FlightQuoteRead(**_to_flat(doc)) async for doc in cursor]
+
+    async def count(self, query: dict) -> int:
+        return await self.collection.count_documents(query)
+
+    async def aggregate(self, pipeline: list[dict]) -> list[dict]:
+        cursor = await self.collection.aggregate(pipeline, allowDiskUse=True)
+        return [doc async for doc in cursor]
+
     async def ensure_indexes(self) -> None:
         await self.collection.create_index(
             [("route.origin", 1), ("route.destination", 1), ("travel.travel_date", 1), ("travel.lead_days", 1)]
         )
+        await self.collection.create_index([("travel.observation_date", 1), ("quality.status", 1)])
+        await self.collection.create_index(
+            [("route.origin", 1), ("route.destination", 1), ("travel.observation_date", -1)]
+        )
+        await self.collection.create_index("dedup_key")
         await self.collection.create_index("search_run_id")
         await self.collection.create_index([("created_at", -1)])
         await self.collection.create_index([("availability.status", 1), ("quality.status", 1)])

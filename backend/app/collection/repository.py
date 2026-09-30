@@ -92,8 +92,17 @@ class CollectionRepository:
         )
         return await self.raw_observations.create(document)
 
-    async def mark_raw_observation_status(self, observation_id: str, status: RawObservationStatus) -> None:
-        await self.raw_observations.set_status(observation_id, status.value)
+    async def mark_raw_observation_status(
+        self,
+        observation_id: str,
+        status: RawObservationStatus,
+        *,
+        quality_status: str | None = None,
+        quality_reason: str | None = None,
+    ) -> None:
+        await self.raw_observations.set_status(
+            observation_id, status.value, quality_status=quality_status, quality_reason=quality_reason
+        )
 
     async def persist_flight_quote(self, quote: FlightQuoteCreate) -> str:
         return await self.flight_quotes.create(quote)

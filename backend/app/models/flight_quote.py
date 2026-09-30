@@ -32,6 +32,8 @@ class TravelInfo(BaseModel):
     """``travel_date`` is a midnight-UTC ``datetime`` - BSON has no ``date`` type."""
 
     travel_date: datetime
+    # IST calendar date of observation, stored as midnight-UTC datetime.
+    observation_date: datetime | None = None
     departure_datetime: datetime | None = None
     arrival_datetime: datetime | None = None
     lead_days: int
@@ -46,6 +48,7 @@ class FlightInfo(BaseModel):
 class FareBreakdown(BaseModel):
     base_fare: float | None = None
     taxes: float | None = None
+    airport_charges: float | None = None
     user_development_fee: float | None = None
     convenience_fee: float | None = None
     fuel_surcharge: float | None = None
@@ -55,6 +58,7 @@ class FareBreakdown(BaseModel):
     other_fees: float | None = None
     total_fare: float | None = None
     currency: str = "INR"
+    components_available: list[str] = Field(default_factory=list)
 
 
 class FareAttributes(BaseModel):
@@ -79,6 +83,9 @@ class QualityInfo(BaseModel):
     status: QualityStatus = QualityStatus.RAW
     score: float | None = None
     reason: str | None = None
+    flags: list[str] = Field(default_factory=list)
+    robust_z: float | None = None
+    rules_version: str | None = None
 
 
 class ProvenanceInfo(BaseModel):
@@ -88,6 +95,8 @@ class ProvenanceInfo(BaseModel):
     collected_at: datetime
     raw_observation_id: str | None = None
     raw_quote_hash: str | None = None
+    normalization_version: str | None = None
+    extraction_version: str | None = None
 
 
 class FlightQuoteDocument(BaseModel):
@@ -104,4 +113,6 @@ class FlightQuoteDocument(BaseModel):
     availability: AvailabilityInfo
     quality: QualityInfo
     provenance: ProvenanceInfo
+    # sha256 identity used for duplicate detection (app.quality.engine.compute_dedup_key).
+    dedup_key: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
